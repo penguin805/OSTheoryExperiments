@@ -98,6 +98,48 @@ RESULT NextFitAlloc(unsigned Size)
 
 RESULT BestFitAlloc(unsigned Size)
 {
+	int Value; // Record the minimum remaining space
+	FREEBLOCKTABLE_NODE *TempNode = (FREEBLOCKTABLE_NODE *)malloc(sizeof(FREEBLOCKTABLE_NODE));
+	TempNode->MemBlock.BlockSize = Size;
+	TempNode->MemBlock.State = BLOCK_BUSY;
+	FREEBLOCKTABLE_NODE *NodeP = BlockTable.Head->Next; // Loop to find the available mem block
+	FREEBLOCKTABLE_NODE *NodeQ = NULL; // Record the best position
+
+	while (NodeP)
+	{
+		if (NodeP->MemBlock.State == BLOCK_FREE && (NodeP->MemBlock.BlockSize >= Size))
+		{
+			if (NodeQ == NULL)
+			{
+				NodeQ = NodeP;
+				Value = NodeP->MemBlock.BlockSize - Size;
+			}
+			else if (NodeQ->MemBlock.BlockSize > NodeP->MemBlock.BlockSize)
+			{
+				NodeQ = NodeP;
+				Value = NodeP->MemBlock.BlockSize - Size;
+			}
+		}
+		NodeP = NodeP->Next;
+	}
+	if (NodeQ == NULL) // Not found
+	{
+		return ERROR;
+	}
+	else if (NodeQ->MemBlock.BlockSize == Size) // Free block size equals to the request size
+	{
+		NodeQ->MemBlock.State = BLOCK_BUSY;
+	}
+	else // Free block size > the request size
+	{
+		TempNode->Prev = NodeQ->Prev;
+		TempNode->Next = NodeQ;
+		TempNode->MemBlock.BlockAddress = NodeQ->MemBlock.BlockAddress;
+		NodeQ->Prev->Next = TempNode;
+		NodeQ->Prev = TempNode;
+		NodeQ->MemBlock.BlockAddress += Size;
+		NodeQ->MemBlock.BlockSize = Value;
+	}
 	return SUCCESS;
 }
 
@@ -116,7 +158,45 @@ RESULT LAlloc(unsigned Size)
 
 void LFree(unsigned Addr)
 {
+	FREEBLOCKTABLE_NODE *pNode = BlockTable.Head->Next;
+	while (pNode && pNode->MemBlock.BlockAddress != Addr)
+	{
+		pNode = pNode->Next;
+	}
+	if (pNode == NULL)
+		return;
 
+	pNode->MemBlock.State = BLOCK_FREE;
+	// Merge with the previous free block
+	if (pNode->Prev != BlockTable.Head && pNode->Prev->MemBlock.State == BLOCK_FREE)
+	{
+		pNode->Prev->MemBlock.BlockSize += pNode->MemBlock.BlockSize;
+		pNode->Prev->Next = pNode->Next;
+		pNode->Next->Prev = pNode->Prev;
+		FREEBLOCKTABLE_NODE *pTemp = pNode;
+		pNode = pNode->Prev;
+		//free(pTemp);
+		memset(pTemp, 0, sizeof(FREEBLOCKTABLE_NODE));
+	}
+	// Merge with the next free block
+	if (pNode->Next != BlockTable.Tail && pNode->Next->MemBlock.State == BLOCK_FREE)
+	{
+		pNode->MemBlock.BlockSize += pNode->Next->MemBlock.BlockSize;
+		pNode->Next->Next->Prev = pNode;
+		FREEBLOCKTABLE_NODE *pTemp = pNode->Next;
+		pNode->Next = pNode->Next->Next;
+		//free(pTemp);
+		memset(pTemp, 0, sizeof(FREEBLOCKTABLE_NODE));
+	}
+	// Merge with the last free block
+	if (pNode->Next == BlockTable.Tail && pNode->Next->MemBlock.State == BLOCK_FREE)
+	{
+		pNode->MemBlock.BlockSize += pNode->Next->MemBlock.BlockSize;
+		//free(pNode->Next);
+		memset(pNode->Next, 0, sizeof(FREEBLOCKTABLE_NODE));
+		pNode->Next = NULL;
+		BlockTable.Tail = pNode;
+	}
 }
 
 void PrintTable()
